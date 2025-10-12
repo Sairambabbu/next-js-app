@@ -2,11 +2,8 @@ name: next-js-app
 
 on:
   pull_request:
-    branches: ["main", "dev", "qa"]
-    types:
-      - opened
-      - synchronize
-      - reopened
+    branches: ["main", "dev", "qa", "demo"]
+    types: [opened, synchronize, reopened]
   push:
     branches:
       - rc/*
@@ -17,20 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - name: Check PR source branch
+      - name: Validate PR source branch
         run: |
+          echo "🔍 Validating PR source branch..."
           echo "PR source branch: ${{ github.head_ref }}"
           if [[ "${{ github.head_ref }}" != rc/* ]]; then
-            echo "❌ PR is NOT from rc/* branch — failing the check!"
+            echo "❌ Invalid source branch! Only PRs from rc/* branches are allowed."
             exit 1
           fi
-          echo "✅ PR is from rc/* branch — check passed."
+          echo "✅ Valid PR source branch: ${{ github.head_ref }}"
 
   build:
     name: Build Application
     runs-on: ubuntu-latest
+    # Run for pushes to rc/* or PRs from rc/* to main/dev/qa/demo
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/rc/')) ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/'))
     needs: [validate-rc-pr]
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
         node-version: [18.x, 20.x, 22.x]
@@ -56,10 +57,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js 20.x
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.x
           cache: 'npm'
 
       - name: Installing Dependencies
@@ -75,6 +76,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    # Only push Docker image on rc/* push events (not PRs)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/rc/')
 
     steps:
       - name: Checkout code
@@ -84,7 +87,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
-          aws-region: us-east-1  # or your region
+          aws-region: us-east-1
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -96,7 +99,9 @@ jobs:
           ECR_REPOSITORY: next-js-app
           IMAGE_TAG: ${{ github.run_id }}
         run: |
+          echo "🔧 Building Docker image..."
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "✅ Docker image pushed to ECR: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
