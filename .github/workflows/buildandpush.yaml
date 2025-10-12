@@ -3,16 +3,40 @@ name: next-js-app
 on:
   pull_request:
     branches: ["main", "dev", "qa"]
+    types:
+      - opened
+      - synchronize
+      - reopened
+  push:
+    branches:
+      - rc/*
 
 jobs:
-  build:
+  validate-rc-pr:
+    name: Validate PR source branch is rc/*
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check PR source branch
+        run: |
+          echo "PR source branch: ${{ github.head_ref }}"
+          if [[ "${{ github.head_ref }}" != rc/* ]]; then
+            echo "❌ PR is NOT from rc/* branch — failing the check!"
+            exit 1
+          fi
+          echo "✅ PR is from rc/* branch — check passed."
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [validate-rc-pr]
+    # For push, build runs normally; for PR, runs only if validation passed (because of 'needs')
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
         node-version: [18.x, 20.x, 22.x]
-
     steps:
-      - uses: actions/checkout@v4  # fixed typo from actons -> actions, and used latest v4
+      - uses: actions/checkout@v4
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
@@ -27,18 +51,16 @@ jobs:
         run: npm run build
 
   unit-tests:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x, 22.x]
-
+    needs: [build]
     steps:
       - uses: actions/checkout@v4
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: ${{ matrix.node-version }}  # Or you can sync with matrix if needed
           cache: 'npm'
 
       - name: Installing Dependencies
