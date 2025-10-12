@@ -30,7 +30,6 @@ jobs:
     name: Build Application
     runs-on: ubuntu-latest
     needs: [validate-rc-pr]
-    # For push, build runs normally; for PR, runs only if validation passed (because of 'needs')
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
@@ -60,7 +59,7 @@ jobs:
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ matrix.node-version }}  # Or you can sync with matrix if needed
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Installing Dependencies
@@ -68,3 +67,39 @@ jobs:
 
       - name: Running test cases
         run: npm run test
+
+  docker-build-push:
+    name: Build & Push Docker Image to ECR
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
+          aws-region: us-east-1  # or your region
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag, and Push Docker Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: next-js-app
+          IMAGE_TAG: ${{ github.run_id }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Image pushed successfully
+        run: echo "✅ Docker image pushed to ECR: ${{ steps.login-ecr.outputs.registry }}/next-js-app:${{ github.run_id }}"
