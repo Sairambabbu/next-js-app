@@ -12,29 +12,37 @@ jobs:
   validate-rc-pr:
     name: Validate PR source branch is rc/*
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
-      - name: Validate PR source branch
+      - name: Validate PR or Push Source
         run: |
-          echo "🔍 Validating PR source branch..."
-          echo "PR source branch: ${{ github.head_ref }}"
-          if [[ "${{ github.head_ref }}" != rc/* ]]; then
-            echo "❌ Invalid source branch! Only PRs from rc/* branches are allowed."
+          echo "🔍 Event: ${{ github.event_name }}"
+          echo "🔍 Head ref: ${{ github.head_ref }}"
+          echo "🔍 Ref: ${{ github.ref }}"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ github.head_ref }}" != rc/* ]]; then
+              echo "❌ Invalid PR source branch! Only rc/* branches are allowed."
+              exit 1
+            fi
+            echo "✅ Valid PR from rc/* branch."
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ github.ref }}" != refs/heads/rc/* ]]; then
+              echo "❌ Invalid push target! Only rc/* branches are allowed."
+              exit 1
+            fi
+            echo "✅ Valid push to rc/* branch."
+          else
+            echo "❌ Unsupported event type: ${{ github.event_name }}"
             exit 1
           fi
-          echo "✅ Valid PR source branch: ${{ github.head_ref }}"
 
   build:
     name: Build Application
     runs-on: ubuntu-latest
-    # Run for pushes to rc/* or PRs from rc/* to main/dev/qa/demo
-    if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/rc/')) ||
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/'))
     needs: [validate-rc-pr]
     strategy:
       matrix:
-        node-version: [18.x, 20.x, 22.x]
+        node-version: [20.x]
     steps:
       - uses: actions/checkout@v4
 
@@ -56,11 +64,10 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.x
           cache: 'npm'
 
       - name: Installing Dependencies
@@ -76,9 +83,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # Only push Docker image on rc/* push events (not PRs)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/rc/')
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
