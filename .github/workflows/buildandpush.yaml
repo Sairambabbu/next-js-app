@@ -3,7 +3,7 @@ name: next-js-app
 on:
   pull_request:
     branches: ["main", "dev", "qa", "demo"]
-    types: [opened, synchronize, reopened]
+    types: [opened]
   push:
     branches:
       - rc/*
