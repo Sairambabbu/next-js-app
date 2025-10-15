@@ -7,5 +7,5 @@ variable "aws_region" {
 variable "cluster_name" {
   description = "EKS cluster name"
   type        = string
-  default     = "crossplane-v3"
+  default     = "crossplane-v4"
 }
