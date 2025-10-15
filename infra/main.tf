@@ -48,6 +48,14 @@ module "eks" {
   cluster_endpoint_public_access  = true
   cluster_endpoint_private_access = true
 
+  access_entries = {
+  admin = {
+    principal_arn = "arn:aws:iam::833237060739:user/sairam"
+    kubernetes_groups = ["system:masters"]
+  }
+}
+
+
 
   eks_managed_node_groups = {
     default = {
