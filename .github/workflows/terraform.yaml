@@ -1,0 +1,42 @@
+name: Terraform Deploy (EKS)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+  pull_request:
+    paths:
+      - 'infra/**'
+
+permissions:
+  id-token: write        # Required for OIDC federation
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform -chdir=infra init
+
+      - name: Terraform Plan
+        run: terraform -chdir=infra plan
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform -chdir=infra apply -auto-approve
