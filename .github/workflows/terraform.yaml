@@ -1,16 +1,15 @@
 name: Terraform Deploy (EKS)
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'infra/**'
   pull_request:
-    paths:
-      - 'infra/**'
+    branches: ["main", "dev", "qa"]
+    types: [opened]
+  push:
+    branches:
+      - rc/*
 
 permissions:
-  id-token: write        # Required for OIDC federation
+  id-token: write        # Required for GitHub OIDC auth
   contents: read
 
 jobs:
@@ -19,13 +18,13 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
+          role-to-assume: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/github-oidc-role
           aws-region: us-east-1
 
       - name: Setup Terraform
@@ -34,9 +33,12 @@ jobs:
       - name: Terraform Init
         run: terraform -chdir=infra init
 
+      - name: Terraform Validate
+        run: terraform -chdir=infra validate
+
       - name: Terraform Plan
         run: terraform -chdir=infra plan
 
       - name: Terraform Apply
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name == 'push'
         run: terraform -chdir=infra apply -auto-approve
