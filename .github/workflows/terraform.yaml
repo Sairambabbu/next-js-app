@@ -39,6 +39,6 @@ jobs:
       - name: Terraform Plan
         run: terraform -chdir=infra plan
 
-      - name: Terraform Apply
+      - name: Terraform destroy
         if: github.event_name == 'push'
-        run: terraform -chdir=infra apply -auto-approve
+        run: terraform -chdir=infra destroy -auto-approve
