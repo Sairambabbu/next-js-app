@@ -3,14 +3,14 @@ name: next-js-app
 on:
   pull_request:
     branches: ["main", "dev", "qa", "demo"]
-    types: [opened]
+    types: [opened, synchronize, reopened]
   push:
     branches:
       - rc/*
 
 jobs:
   validate-rc-pr:
-    name: Validate PR source branch is rc/*
+    name: Validate PR Source Branch
     runs-on: ubuntu-latest
     steps:
       - name: Validate PR or Push Source
@@ -31,9 +31,6 @@ jobs:
               exit 1
             fi
             echo "✅ Valid push to rc/* branch."
-          else
-            echo "❌ Unsupported event type: ${{ github.event_name }}"
-            exit 1
           fi
 
   build:
@@ -52,10 +49,10 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
-      - name: Installing Dependencies
+      - name: Install Dependencies
         run: npm install
 
-      - name: Build command
+      - name: Build Application
         run: npm run build
 
   unit-tests:
@@ -70,10 +67,10 @@ jobs:
           node-version: 20.x
           cache: 'npm'
 
-      - name: Installing Dependencies
+      - name: Install Dependencies
         run: npm install
 
-      - name: Running test cases
+      - name: Run Tests
         run: npm run test
 
   docker-build-push:
@@ -83,11 +80,12 @@ jobs:
     permissions:
       id-token: write
       contents: read
+
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
@@ -97,18 +95,18 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, Tag, and Push Docker Image
+      - name: Build, Tag & Push Image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: dev/next-js-app
           IMAGE_TAG: ${{ github.run_id }}
         run: |
-          echo "🔧 Building Docker images..."
+          echo "🔧 Building Docker image..."
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          echo "✅ Docker image pushed to ECR: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "✅ Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
   deploy:
     name: Deploy to ArgoCD
@@ -120,24 +118,57 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/<YOUR_OIDC_ROLE>
           aws-region: us-east-1
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: latest
+      - name: Install AWS, kubectl, eksctl, Helm, and ArgoCD CLI
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y curl unzip tar gzip
+
+          echo "🧩 Installing AWS CLI..."
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+
+          echo "🧩 Installing kubectl..."
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          echo "🧩 Installing eksctl..."
+          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
+          tar -xzf eksctl_$(uname -s)_amd64.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
+
+          echo "🧩 Installing Helm..."
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+          echo "🧩 Installing ArgoCD CLI..."
+          curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region us-east-1
+          aws eks update-kubeconfig --name <YOUR_EKS_CLUSTER_NAME> --region us-east-1
 
       - name: Deploy ArgoCD Application
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
         run: |
-          kubectl apply -f argo/application.yaml
+          echo "🔐 Logging in to ArgoCD..."
+          argocd login $ARGOCD_SERVER --grpc-web --auth-token $ARGOCD_AUTH_TOKEN
+
+          echo "🚀 Applying ArgoCD Application manifest..."
+          kubectl apply -f argo/application.yaml -n argocd
+
+          echo "🔁 Syncing Application..."
+          argocd app sync nextjs-app --timeout 300
+
+          echo "🧭 Waiting for Application Health..."
+          argocd app wait nextjs-app --health --timeout 300
