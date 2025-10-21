@@ -1,20 +1,21 @@
 replicaCount: 1
 
-# --- Next.js App Configuration ---
-appName: nextjs-web
+# --- Global ---
 namespace: dev
 
-image:
-  repository: "833237060739.dkr.ecr.us-east-1.amazonaws.com/dev/next-js-app"  # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/nextjs
-  tag: "latest"
-  pullPolicy: IfNotPresent
+# --- Next.js App ---
+app:
+  name: nextjs-web
+  image:
+    repository: "833237060739.dkr.ecr.us-east-1.amazonaws.com/dev/next-js-app"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 3000
 
-service:
-  type: ClusterIP
-  port: 80
-  targetPort: 3000
-
-# --- Ingress Configuration ---
+# --- Shared Ingress Settings ---
 ingress:
   enabled: true
   className: alb
@@ -26,20 +27,22 @@ ingress:
     alb.ingress.kubernetes.io/backend-protocol: HTTP
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
     alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
-    alb.ingress.kubernetes.io/healthcheck-path: /
     alb.ingress.kubernetes.io/success-codes: "200"
 
-  # Each rule becomes a path in the ALB
-  rules:
-    - name: nextjs
-      namespace: dev
-      serviceName: nextjs-web
-      servicePort: 80
-      path: /
-      pathType: Prefix
-    - name: argocd
-      namespace: argocd
-      serviceName: argocd-server
-      servicePort: 443
-      path: /argo
-      pathType: Prefix
+# --- Next.js Ingress Rule ---
+nextjsIngress:
+  enabled: true
+  path: /
+  pathType: Prefix
+  servicePort: 80
+  healthcheckPath: /
+
+# --- ArgoCD Ingress Rule ---
+argocdIngress:
+  enabled: true
+  namespace: argocd
+  serviceName: argocd-server
+  servicePort: 443
+  path: /argo
+  pathType: Prefix
+  healthcheckPath: /healthz
