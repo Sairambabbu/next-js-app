@@ -127,30 +127,52 @@ jobs:
           role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
           aws-region: us-east-1
 
-      - name: Install AWS, kubectl, eksctl, Helm, and ArgoCD CLI
+      - name: Check & Install Required CLIs
         run: |
           sudo apt-get update -y
           sudo apt-get install -y curl unzip tar gzip
 
-          echo "🧩 Installing AWS CLI..."
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip -q awscliv2.zip
-          sudo ./aws/install
+          echo "🔍 Checking CLI tools..."
 
-          echo "🧩 Installing kubectl..."
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          if ! command -v aws &> /dev/null; then
+            echo "🧩 Installing AWS CLI..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install
+          else
+            echo "✅ AWS CLI already installed."
+          fi
 
-          echo "🧩 Installing eksctl..."
-          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
-          tar -xzf eksctl_$(uname -s)_amd64.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
+          if ! command -v kubectl &> /dev/null; then
+            echo "🧩 Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          else
+            echo "✅ kubectl already installed."
+          fi
 
-          echo "🧩 Installing Helm..."
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          if ! command -v eksctl &> /dev/null; then
+            echo "🧩 Installing eksctl..."
+            curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
+            tar -xzf eksctl_$(uname -s)_amd64.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
+          else
+            echo "✅ eksctl already installed."
+          fi
 
-          echo "🧩 Installing ArgoCD CLI..."
-          curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x /usr/local/bin/argocd
+          if ! command -v helm &> /dev/null; then
+            echo "🧩 Installing Helm..."
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          else
+            echo "✅ Helm already installed."
+          fi
+
+          if ! command -v argocd &> /dev/null; then
+            echo "🧩 Installing ArgoCD CLI..."
+            curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+            chmod +x argocd && sudo mv argocd /usr/local/bin/
+          else
+            echo "✅ ArgoCD CLI already installed."
+          fi
 
       - name: Update kubeconfig
         run: |
