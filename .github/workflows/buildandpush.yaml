@@ -185,9 +185,3 @@ jobs:
         run: |
           echo "🚀 Applying ArgoCD Application manifest..."
           kubectl apply -f argo/application.yaml -n argocd
-
-          echo "🔁 Syncing Application..."
-          argocd app sync nextjs-app --timeout 300
-
-          echo "🧭 Waiting for Application Health..."
-          argocd app wait nextjs-app --health --timeout 300
