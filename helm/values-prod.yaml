@@ -1,0 +1,15 @@
+replicaCount: 1
+appName: nextjs-web
+# --- Global ---
+namespace: prod
+
+# --- Next.js App ---
+app:
+  name: nextjs-web
+  image:
+    repository: "833237060739.dkr.ecr.us-east-1.amazonaws.com/prod/next-js-app"
+    tag: "prod-latest"
+    pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true

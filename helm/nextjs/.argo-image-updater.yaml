@@ -1,0 +1,31 @@
+version: 1
+
+git:
+  repo: https://github.com/Sairambabbu/next-js-app.git
+  branch: main
+  # For git:push, the image-updater process needs git credentials: SSH key secret or HTTPS token
+  # If you use ssh, configure image-updater with sshKeySecret in its deployment
+
+images:
+  - name: 833237060739.dkr.ecr.us-east-1.amazonaws.com/dev/next-js-app
+    updateStrategy: latest
+    update:
+      - file: helm/nextjs/values-dev.yaml
+        matcher: "app.image.tag"
+        template: "dev-{{ .Tag }}"   # .Tag is the tag detected by image updater (e.g. short sha)
+  - name: 833237060739.dkr.ecr.us-east-1.amazonaws.com/qa/next-js-app
+    updateStrategy: latest
+    update:
+      - file: helm/nextjs/values-qa.yaml
+        matcher: "app.image.tag"
+        template: "qa-{{ .Tag }}"
+  - name: 833237060739.dkr.ecr.us-east-1.amazonaws.com/prod/next-js-app
+    updateStrategy: latest
+    update:
+      - file: helm/nextjs/values-prod.yaml
+        matcher: "app.image.tag"
+        template: "prod-{{ .Tag }}"
+
+git_push:
+  method: git
+  commitMessage: 'chore: image update to {{ .Image }}:{{ .NewTag }}'
