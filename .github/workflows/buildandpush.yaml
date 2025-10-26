@@ -183,12 +183,6 @@ jobs:
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
           ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
         run: |
-          echo "🔐 Logging in to ArgoCD..."
-          argocd login $ARGOCD_SERVER:80 \
-          --grpc-web \
-          --auth-token $ARGOCD_AUTH_TOKEN \
-          --insecure
-
           echo "🚀 Applying ArgoCD Application manifest..."
           kubectl apply -f argo/application.yaml -n argocd
 
