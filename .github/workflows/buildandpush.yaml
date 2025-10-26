@@ -2,39 +2,44 @@ name: next-js-app
 
 on:
   pull_request:
-    branches: ["main", "dev", "qa"]
-    types:
-      - opened
-      - synchronize
-      - reopened
+    branches: ["main", "dev", "qa", "demo"]
+    types: [opened]
   push:
     branches:
       - rc/*
 
 jobs:
   validate-rc-pr:
-    name: Validate PR source branch is rc/*
+    name: Validate PR Source Branch
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
-      - name: Check PR source branch
+      - name: Validate PR or Push Source
         run: |
-          echo "PR source branch: ${{ github.head_ref }}"
-          if [[ "${{ github.head_ref }}" != rc/* ]]; then
-            echo "❌ PR is NOT from rc/* branch — failing the check!"
-            exit 1
+          echo "🔍 Event: ${{ github.event_name }}"
+          echo "🔍 Head ref: ${{ github.head_ref }}"
+          echo "🔍 Ref: ${{ github.ref }}"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ github.head_ref }}" != rc/* ]]; then
+              echo "❌ Invalid PR source branch! Only rc/* branches are allowed."
+              exit 1
+            fi
+            echo "✅ Valid PR from rc/* branch."
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ github.ref }}" != refs/heads/rc/* ]]; then
+              echo "❌ Invalid push target! Only rc/* branches are allowed."
+              exit 1
+            fi
+            echo "✅ Valid push to rc/* branch."
           fi
-          echo "✅ PR is from rc/* branch — check passed."
 
   build:
     name: Build Application
     runs-on: ubuntu-latest
     needs: [validate-rc-pr]
-    # For push, build runs normally; for PR, runs only if validation passed (because of 'needs')
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
-        node-version: [18.x, 20.x, 22.x]
+        node-version: [20.x]
     steps:
       - uses: actions/checkout@v4
 
@@ -44,10 +49,10 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
-      - name: Installing Dependencies
+      - name: Install Dependencies
         run: npm install
 
-      - name: Build command
+      - name: Build Application
         run: npm run build
 
   unit-tests:
@@ -56,15 +61,133 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ matrix.node-version }}  # Or you can sync with matrix if needed
+          node-version: 20.x
           cache: 'npm'
 
-      - name: Installing Dependencies
+      - name: Install Dependencies
         run: npm install
 
-      - name: Running test cases
+      - name: Run Tests
         run: npm run test
+
+  docker-build-push:
+    name: Build & Push Docker Image to ECR
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag & Push Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: dev/next-js-app
+          IMAGE_TAG: ${{ github.run_id }}
+        run: |
+          echo "🔧 Building Docker image..."
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "✅ Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  deploy:
+    name: Deploy to ArgoCD
+    runs-on: ubuntu-latest
+    needs: [docker-build-push]
+    if: startsWith(github.ref, 'refs/heads/rc/')
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
+          aws-region: us-east-1
+
+      - name: Check & Install Required CLIs
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y curl unzip tar gzip
+
+          echo "🔍 Checking CLI tools..."
+
+          if ! command -v aws &> /dev/null; then
+            echo "🧩 Installing AWS CLI..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install
+          else
+            echo "✅ AWS CLI already installed."
+          fi
+
+          if ! command -v kubectl &> /dev/null; then
+            echo "🧩 Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          else
+            echo "✅ kubectl already installed."
+          fi
+
+          if ! command -v eksctl &> /dev/null; then
+            echo "🧩 Installing eksctl..."
+            curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
+            tar -xzf eksctl_$(uname -s)_amd64.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
+          else
+            echo "✅ eksctl already installed."
+          fi
+
+          if ! command -v helm &> /dev/null; then
+            echo "🧩 Installing Helm..."
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          else
+            echo "✅ Helm already installed."
+          fi
+
+          if ! command -v argocd &> /dev/null; then
+            echo "🧩 Installing ArgoCD CLI..."
+            curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+            chmod +x argocd && sudo mv argocd /usr/local/bin/
+          else
+            echo "✅ ArgoCD CLI already installed."
+          fi
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name crossplane --region us-east-1
+
+      - name: Deploy ArgoCD Application
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          echo "🚀 Applying ArgoCD Application manifest..."
+          kubectl apply -f argo/application.yaml -n argocd
+
+          echo "🔁 Syncing Application..."
+          argocd app sync nextjs-app --timeout 300
+
+          echo "🧭 Waiting for Application Health..."
+          argocd app wait nextjs-app --health --timeout 300

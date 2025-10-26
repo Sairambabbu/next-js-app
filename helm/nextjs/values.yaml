@@ -1,0 +1,48 @@
+replicaCount: 1
+appName: nextjs-web
+# --- Global ---
+namespace: dev
+
+# --- Next.js App ---
+app:
+  name: nextjs-web
+  image:
+    repository: "833237060739.dkr.ecr.us-east-1.amazonaws.com/dev/next-js-app"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 3000
+
+# --- Shared Ingress Settings ---
+ingress:
+  enabled: true
+  className: alb
+  albName: shared-alb
+  albGroup: shared
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/success-codes: "200"
+
+# --- Next.js Ingress Rule ---
+nextjsIngress:
+  enabled: true
+  path: /
+  pathType: Prefix
+  servicePort: 80
+  healthcheckPath: /
+
+# --- ArgoCD Ingress Rule ---
+argocdIngress:
+  enabled: true
+  namespace: argocd
+  serviceName: argocd-server
+  servicePort: 443
+  path: /argo
+  pathType: Prefix
+  healthcheckPath: /healthz
