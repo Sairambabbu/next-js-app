@@ -2,186 +2,124 @@ name: next-js-app
 
 on:
   pull_request:
-    branches: ["main", "dev", "qa", "demo"]
-    types: [opened]
+    types: [opened, synchronize]
   push:
     branches:
-      - rc/*
+      - dev
+      - qa
+      - main
+      - 'rc/*'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 833237060739.dkr.ecr.us-east-1.amazonaws.com
 
 jobs:
-  validate-rc-pr:
-    name: Validate PR Source Branch
+  validate-pr:
+    name: Validate PR source branch
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Validate PR or Push Source
+      - name: Validate PR source branch is rc/*
         run: |
-          echo "🔍 Event: ${{ github.event_name }}"
-          echo "🔍 Head ref: ${{ github.head_ref }}"
-          echo "🔍 Ref: ${{ github.ref }}"
-
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            if [[ "${{ github.head_ref }}" != rc/* ]]; then
-              echo "❌ Invalid PR source branch! Only rc/* branches are allowed."
-              exit 1
-            fi
-            echo "✅ Valid PR from rc/* branch."
-          elif [[ "${{ github.event_name }}" == "push" ]]; then
-            if [[ "${{ github.ref }}" != refs/heads/rc/* ]]; then
-              echo "❌ Invalid push target! Only rc/* branches are allowed."
-              exit 1
-            fi
-            echo "✅ Valid push to rc/* branch."
+          echo "PR head ref: ${{ github.head_ref }}"
+          if [[ "${{ github.head_ref }}" != rc/* ]]; then
+            echo "❌ Invalid PR source branch! Only rc/* source branches are allowed."
+            exit 1
           fi
+          echo "✅ PR source branch is rc/* - proceed."
 
-  build:
-    name: Build Application
+  build-test:
+    name: Build & Test
     runs-on: ubuntu-latest
-    needs: [validate-rc-pr]
-    strategy:
-      matrix:
-        node-version: [20.x]
+    needs: [validate-pr]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Use Node.js ${{ matrix.node-version }}
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Build Application
+          node-version: 20
+      - name: Install
+        run: npm ci
+      - name: Build
         run: npm run build
-
-  unit-tests:
-    name: Run Unit Tests
-    runs-on: ubuntu-latest
-    needs: [build]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20.x
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Run Tests
-        run: npm run test
+      - name: Run tests
+        run: npm test
 
   docker-build-push:
-    name: Build & Push Docker Image to ECR
+    name: Build & Push Image to ECR
     runs-on: ubuntu-latest
-    needs: [unit-tests]
+    needs: build-test
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/dev') || startsWith(github.ref, 'refs/heads/qa') || startsWith(github.ref, 'refs/heads/main') || startsWith(github.ref, 'refs/heads/rc/'))
     permissions:
       id-token: write
-      contents: read
-
+      contents: write
+    env:
+      AWS_REGION: us-east-1
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Configure AWS Credentials (OIDC)
+      - name: Determine env & repos
+        id: vars
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          if [[ "$BRANCH" == "dev" ]]; then
+            echo "ENV=dev" >> $GITHUB_OUTPUT
+            echo "ECR_REPO=dev/next-js-app" >> $GITHUB_OUTPUT
+            echo "VALUES_FILE=helm/nextjs/values-dev.yaml" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH" == "qa" ]]; then
+            echo "ENV=qa" >> $GITHUB_OUTPUT
+            echo "ECR_REPO=qa/next-js-app" >> $GITHUB_OUTPUT
+            echo "VALUES_FILE=helm/nextjs/values-qa.yaml" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH" == "main" ]]; then
+            echo "ENV=prod" >> $GITHUB_OUTPUT
+            echo "ECR_REPO=prod/next-js-app" >> $GITHUB_OUTPUT
+            echo "VALUES_FILE=helm/nextjs/values-prod.yaml" >> $GITHUB_OUTPUT
+          elif [[ $BRANCH == rc/* ]]; then
+            echo "ENV=rc" >> $GITHUB_OUTPUT
+            echo "ECR_REPO=dev/next-js-app" >> $GITHUB_OUTPUT
+            echo "VALUES_FILE=helm/nextjs/values-dev.yaml" >> $GITHUB_OUTPUT
+          else
+            echo "ENV=unknown" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
+      - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, Tag & Push Image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: dev/next-js-app
-          IMAGE_TAG: ${{ github.run_id }}
+      - name: Build, Tag, Push
         run: |
-          echo "🔧 Building Docker image..."
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          echo "✅ Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-
-  deploy:
-    name: Deploy to ArgoCD
+          IMAGE_TAG="${{ steps.vars.outputs.ENV }}-${{ steps.vars.outputs.SHORT_SHA }}"
+          REPO="${{ env.ECR_REGISTRY }}/${{ steps.vars.outputs.ECR_REPO }}"
+          echo "Building -> $REPO:$IMAGE_TAG"
+          docker build -t "$REPO:$IMAGE_TAG" .
+          docker push "$REPO:$IMAGE_TAG"
+          # push a latest tag for convenience (optional)
+          docker tag "$REPO:$IMAGE_TAG" "$REPO:latest"
+          docker push "$REPO:latest"
+          echo "image=$REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+  post-main-branch-tasks:
+    name: Post Merge Tasks
     runs-on: ubuntu-latest
-    needs: [docker-build-push]
-    if: startsWith(github.ref, 'refs/heads/rc/')
+    needs: docker-build-push
     permissions:
-      id-token: write
-      contents: read
-
+      contents: write
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.OIDC_ROLE_DEV }}
-          aws-region: us-east-1
-
-      - name: Check & Install Required CLIs
+      - name: Create release branch
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y curl unzip tar gzip
-
-          echo "🔍 Checking CLI tools..."
-
-          if ! command -v aws &> /dev/null; then
-            echo "🧩 Installing AWS CLI..."
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip -q awscliv2.zip
-            sudo ./aws/install
-          else
-            echo "✅ AWS CLI already installed."
-          fi
-
-          if ! command -v kubectl &> /dev/null; then
-            echo "🧩 Installing kubectl..."
-            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-          else
-            echo "✅ kubectl already installed."
-          fi
-
-          if ! command -v eksctl &> /dev/null; then
-            echo "🧩 Installing eksctl..."
-            curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
-            tar -xzf eksctl_$(uname -s)_amd64.tar.gz -C /tmp && sudo mv /tmp/eksctl /usr/local/bin
-          else
-            echo "✅ eksctl already installed."
-          fi
-
-          if ! command -v helm &> /dev/null; then
-            echo "🧩 Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "✅ Helm already installed."
-          fi
-
-          if ! command -v argocd &> /dev/null; then
-            echo "🧩 Installing ArgoCD CLI..."
-            curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-            chmod +x argocd && sudo mv argocd /usr/local/bin/
-          else
-            echo "✅ ArgoCD CLI already installed."
-          fi
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --name crossplane --region us-east-1
-
-      - name: Deploy ArgoCD Application
-        env:
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
-          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
-        run: |
-          echo "🚀 Applying ArgoCD Application manifest..."
-          kubectl apply -f argo/application.yaml -n argocd
+          git checkout -b release/${GITHUB_SHA::7}
+          git push origin release/${GITHUB_SHA::7}
