@@ -1,25 +1,25 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: nextjs-app-local
+  name: nextjs-app-prod
   namespace: argocd
   annotations:
-    argocd-image-updater.argoproj.io/image-list: 833237060739.dkr.ecr.us-east-1.amazonaws.com/dev/next-js-app
-    argocd-image-updater.argoproj.io/nextjs.update-strategy: latest
+    argocd-image-updater.argoproj.io/image-list: 833237060739.dkr.ecr.us-east-1.amazonaws.com/prod/next-js-app
+    argocd-image-updater.argoproj.io/update-strategy: latest
     argocd-image-updater.argoproj.io/write-back-method: git:push
     argocd-image-updater.argoproj.io/git-branch: main
 spec:
   project: default
   source:
-    repoURL: https://github.com/Sairambabbu/next-js-app.git # e.g. https://github.com/your-org/next-js-app.git
+    repoURL: https://github.com/Sairambabbu/next-js-app.git
     targetRevision: main
     path: helm/nextjs
     helm:
       valueFiles:
-        - values.yaml
+        - values-prod.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: testing   # ✅ <-- DEPLOY HERE
+    namespace: prod
   syncPolicy:
     automated:
       prune: true
