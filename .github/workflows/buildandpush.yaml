@@ -2,7 +2,7 @@ name: next-js-app
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
   push:
     branches:
       - dev
