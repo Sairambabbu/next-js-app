@@ -3,7 +3,7 @@ appName: nextjs-web
 # --- Global ---
 namespace: qa
 
-# --- Next.js App ---
+# --- Next.js App -----##
 app:
   name: nextjs-web
   image:
