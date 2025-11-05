@@ -8,7 +8,7 @@ app:
   name: nextjs-web
   image:
     repository: "833237060739.dkr.ecr.us-east-1.amazonaws.com/prod/next-js-app"
-    tag: "prod-latest"
+    tag: "latest"
     pullPolicy: IfNotPresent
 
 ingress:
